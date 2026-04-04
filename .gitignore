@@ -20,3 +20,8 @@ tmp*/
 
 data/*.jsonl
 data/*.csv
+
+# Local runtime/artifact files
+.npm-cache/
+Landing-Page-live/
+leads.db
