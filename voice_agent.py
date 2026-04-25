@@ -254,7 +254,7 @@ async def entrypoint(ctx: JobContext):
     await session.generate_reply(
         instructions=(
             "Welcome the caller in one short sentence, mention Wid Wins helps founders turn ideas into structured "
-            "business direction, and ask only one simple question about their idea or current challenge."
+            "business direction, and ask them to share their idea in one simple sentence."
         ),
         allow_interruptions=False,
     )

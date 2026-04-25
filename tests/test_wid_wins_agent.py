@@ -7,8 +7,10 @@ from wid_wins_agent import (
     LeadProfile,
     build_capture_prompt,
     build_conversation_summary,
+    build_idea_saved_message,
     build_follow_up_message,
     build_lead_assessment,
+    build_welcome_message,
     classify_lead,
     recommend_package,
 )
@@ -23,6 +25,7 @@ class WidWinsAgentTests(unittest.TestCase):
         self.assertIn("Speak in short, natural sentences.", AGENT_INSTRUCTIONS)
         self.assertIn("Ask only one question at a time.", AGENT_INSTRUCTIONS)
         self.assertIn("Use plain spoken English suitable for live business conversations.", AGENT_INSTRUCTIONS)
+        self.assertIn("confirm that it has been noted", AGENT_INSTRUCTIONS)
 
     def test_test_env_contains_stability_defaults(self) -> None:
         env_path = Path("tests/.env")
@@ -59,8 +62,12 @@ class WidWinsAgentTests(unittest.TestCase):
 
         self.assertEqual(classify_lead(profile), "high_intent")
         self.assertEqual(recommend_package(profile), "Premium")
-        self.assertIn("Premium", build_follow_up_message(profile))
+        self.assertIn("I note", build_follow_up_message(profile))
         self.assertIn("contact method", build_capture_prompt(profile))
+
+    def test_welcome_and_saved_messages_match_requested_flow(self) -> None:
+        self.assertIn("welcome to Wid Wins", build_welcome_message())
+        self.assertIn("I note", build_idea_saved_message())
 
     def test_qualified_lead_gets_standard_package(self) -> None:
         profile = LeadProfile(

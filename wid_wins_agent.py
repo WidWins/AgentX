@@ -86,23 +86,24 @@ BUDGET_WEIGHTS = {
 
 FOLLOW_UP_TEMPLATES = {
     "high_intent": (
-        "Thanks for sharing that. You sound serious about moving this forward. "
-        "Wid Wins would likely support you best through a deeper strategy conversation and a stronger execution plan. "
-        "The right next step is a focused follow-up with the founder team."
+        "Thanks for sharing that. I note your idea with Wid Wins. "
+        "Please send your name and basic contact details, so the team can reach you soon. "
+        "Nice speaking with you."
     ),
     "qualified": (
-        "You have a promising direction, and this looks like the stage where structure would help a lot. "
-        "Wid Wins can help validate the idea, shape the business model, and give you a practical roadmap. "
-        "A structured follow-up would make sense here."
+        "You have a good direction, and I note your idea with Wid Wins. "
+        "Please send your name and basic contact details, so the team can reach you soon. "
+        "Nice speaking with you."
     ),
     "early_stage": (
-        "You are still early, which is completely fine. "
-        "The most useful next step is to sharpen the problem, target audience, and business direction before going deeper. "
-        "Wid Wins can help you do that in a structured way."
+        "You are still early, and that is okay. "
+        "Share a little more about the idea, and I note it for Wid Wins. "
+        "Then please send your contact details, so the team can follow up soon."
     ),
     "needs_more_info": (
         "There is potential here, but a few basics are still missing. "
-        "Wid Wins would first need a clearer picture of the problem, target users, and what outcome you want."
+        "Please share a simple version of your idea first, and I note it for Wid Wins. "
+        "After that, we can take your contact details."
     ),
     "low_intent": (
         "It sounds like you may not be ready for deeper support yet, and that is okay. "
@@ -189,15 +190,30 @@ def build_follow_up_message(profile: LeadProfile) -> str:
     )
 
 
+def build_welcome_message() -> str:
+    return (
+        "Hi, welcome to Wid Wins. Share your idea in one short sentence, and I note it for you."
+    )
+
+
+def build_idea_saved_message() -> str:
+    return (
+        "I note your idea with Wid Wins. Please send your name and basic contact details, "
+        "and the team will contact you soon. Nice speaking with you."
+    )
+
+
 def build_capture_prompt(profile: LeadProfile) -> str:
     lead_type = classify_lead(profile)
     if lead_type not in CAPTURE_READY_LEAD_TYPES:
-        return "Do not ask for contact details yet. First clarify the idea, problem, users, or seriousness level."
+        return (
+            "Do not ask for contact details yet. First clarify the idea, problem, users, or seriousness level."
+        )
 
     package_name = recommend_package(profile)
     return (
-        "This looks like a strong enough fit for follow-up. Ask naturally for their name and one contact method, "
-        f"and explain that Wid Wins can continue with a {package_name} level conversation if they would like to move ahead."
+        "This looks good for follow-up. Say the idea is noted, ask for the name and one contact method, and tell them Wid Wins will contact them soon. "
+        f"Keep it warm and simple, and mention the {package_name} level conversation if they want to move ahead."
     )
 
 
@@ -283,6 +299,8 @@ Conversation rules:
 - Ask one useful question at a time.
 - Prefer practical language over consultant jargon.
 - Do not invent exact prices, guarantees, case studies, or timelines.
+- When the user shares an idea, confirm that it has been noted, ask for name and basic contact details, and say Wid Wins will contact them soon.
+- End that handoff with a warm closing line like "Great speaking with you."
 - Use the lead assessment tool when details are vague or when you need to recommend a package.
 - Use the follow-up message from the tool output when wrapping up promising leads.
 - Use the capture prompt from the tool output to ask for contact details naturally instead of sounding robotic.

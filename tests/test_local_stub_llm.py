@@ -18,8 +18,8 @@ class LocalStubLLMTests(unittest.TestCase):
     def test_build_reply_empty_ctx(self):
         ctx = llm.ChatContext()
         reply = _build_local_reply(ctx)
-        self.assertIn("Local mode is active", reply)
-        self.assertIn("Tell me your idea", reply)
+        self.assertIn("welcome to Wid Wins", reply)
+        self.assertIn("Share your idea", reply)
 
     def test_build_reply_with_user_context(self):
         ctx = llm.ChatContext()
@@ -57,6 +57,7 @@ class LocalStubLLMTests(unittest.TestCase):
         reply = _build_local_reply(ctx)
         self.assertIn("looks like a", reply)
         self.assertIn("best starting package", reply)
+        self.assertIn("I note", reply)
 
     def test_chat_returns_stream(self):
         async def _create_stream():
@@ -94,4 +95,4 @@ class LocalStubLLMAsyncTests(unittest.IsolatedAsyncioTestCase):
             chunks.append(chunk)
 
         full_content = "".join([c.delta.content for c in chunks if c.delta and c.delta.content])
-        self.assertIn("Tell me your idea", full_content)
+        self.assertIn("Share your idea", full_content)

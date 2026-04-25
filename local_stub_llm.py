@@ -7,7 +7,12 @@ from typing import Any
 
 from livekit.agents import llm
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN, APIConnectOptions, NotGivenOr
-from wid_wins_agent import LeadProfile, build_lead_assessment
+from wid_wins_agent import (
+    LeadProfile,
+    build_idea_saved_message,
+    build_lead_assessment,
+    build_welcome_message,
+)
 
 
 _INTRO_NAME_RE = re.compile(
@@ -78,6 +83,8 @@ _BUDGET_HINTS = (
 )
 
 _STAGE_HINTS = ("idea", "planning", "validation", "execution", "launch", "growth")
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+PHONE_RE = re.compile(r"(?:\+?\d[\d\-\s()]{8,}\d)")
 
 
 def _latest_user_text(chat_ctx: llm.ChatContext) -> str:
@@ -116,6 +123,10 @@ def _next_question_for_text(user_text: str) -> str:
 
 def _contains_any(text: str, tokens: tuple[str, ...]) -> bool:
     return any(token in text for token in tokens)
+
+
+def _has_contact_detail(text: str) -> bool:
+    return bool(EMAIL_RE.search(text) or PHONE_RE.search(text))
 
 
 def _user_messages(chat_ctx: llm.ChatContext) -> list[str]:
@@ -201,21 +212,28 @@ def _question_for_missing_field(field_label: str, latest_user_text: str) -> str:
 def _build_local_reply(chat_ctx: llm.ChatContext) -> str:
     user_text = _latest_user_text(chat_ctx)
     if not user_text:
-        return (
-            "Local mode is active and ready. "
-            "Tell me your idea in one sentence, and I will help you qualify it for Wid Wins."
-        )
+        return build_welcome_message()
 
     name = _extract_name_from_intro(user_text)
     profile = _extract_lead_profile(chat_ctx)
     assessment = build_lead_assessment(profile)
     missing_fields = [str(field) for field in assessment.get("missing_fields", [])]
+    has_contact_detail = _has_contact_detail(user_text)
 
     if name and not profile.idea_summary:
         return (
             f"Nice to meet you, {name}. "
             "Local mode is active without cloud inference credits, and I can still run a full qualification flow. "
             "Tell me your idea in one line and who it is for."
+        )
+
+    if profile.idea_summary and not missing_fields and not has_contact_detail:
+        lead_type = str(assessment.get("lead_type", "qualified")).replace("_", " ")
+        recommended_package = str(assessment.get("recommended_package", "Standard"))
+        return (
+            "Nice. "
+            f"Based on what you shared, this looks like a {lead_type} lead, and {recommended_package} is the best starting package. "
+            f"{build_idea_saved_message()}"
         )
 
     if missing_fields:
@@ -233,7 +251,7 @@ def _build_local_reply(chat_ctx: llm.ChatContext) -> str:
 
         next_question = _question_for_missing_field(missing_fields[0], user_text)
         return (
-            f"{summary}"
+            f"{summary}I note your idea with Wid Wins. "
             "Local mode is active without cloud inference credits, and I can still guide this conversation step by step. "
             f"{next_question}"
         )
@@ -241,9 +259,10 @@ def _build_local_reply(chat_ctx: llm.ChatContext) -> str:
     lead_type = str(assessment.get("lead_type", "qualified")).replace("_", " ")
     recommended_package = str(assessment.get("recommended_package", "Standard"))
     return (
-        "Great clarity. "
+        "Nice. "
         f"Based on what you shared, this looks like a {lead_type} lead, and {recommended_package} is the best starting package. "
-        "Would you like a 60-second action plan or a follow-up message draft next?"
+        "Your idea has been noted with Wid Wins. Please share your name and basic contact details, and the team will contact you soon. "
+        "Nice speaking with you."
     )
 
 
