@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+try:
+    from supabase import create_client
+except ImportError:  # pragma: no cover - local fallback
+    create_client = None
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -30,8 +36,33 @@ CSV_FIELDNAMES = [
     "notes",
 ]
 
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
+SUPABASE_SERVICE_ROLE_KEY = (
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    or os.getenv("SUPABASE_SERVICE_KEY", "")
+).strip()
+STORAGE_BACKEND = os.getenv("WID_WINS_STORAGE_BACKEND", "auto").strip().lower()
+
+_SUPABASE_CLIENT = None
+if create_client and SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and STORAGE_BACKEND != "sqlite":
+    _SUPABASE_CLIENT = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+
+def _use_supabase() -> bool:
+    if STORAGE_BACKEND == "sqlite":
+        return False
+    return _SUPABASE_CLIENT is not None
+
 
 def save_lead(payload: dict[str, Any], destination: Path | None = None) -> Path:
+    if destination is None and _use_supabase():
+        record = {
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            **payload,
+        }
+        _SUPABASE_CLIENT.table("lead_captures").insert(record).execute()
+        return LEADS_PATH
+
     target = destination or LEADS_PATH
     target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -46,8 +77,11 @@ def save_lead(payload: dict[str, Any], destination: Path | None = None) -> Path:
     return target
 
 
-
 def load_leads(source: Path | None = None) -> list[dict[str, Any]]:
+    if source is None and _use_supabase():
+        data = _SUPABASE_CLIENT.table("lead_captures").select("*").order("captured_at", desc=False).execute()
+        return list(data.data or [])
+
     target = source or LEADS_PATH
     if not target.exists():
         return []
@@ -58,7 +92,6 @@ def load_leads(source: Path | None = None) -> list[dict[str, Any]]:
             continue
         records.append(json.loads(line))
     return records
-
 
 
 def export_leads_to_csv(source: Path | None = None, destination: Path | None = None) -> Path:

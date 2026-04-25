@@ -1,12 +1,39 @@
+from __future__ import annotations
+
+import json
 import os
 import re
 import sqlite3
-import json
+from typing import Any
+
+try:
+    from supabase import Client, create_client
+except ImportError:  # pragma: no cover - fallback path for local tests/dev
+    Client = Any  # type: ignore[assignment]
+    create_client = None
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "leads.db")
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 PHONE_RE = re.compile(r"(?:\+?\d[\d\-\s()]{8,}\d)")
+
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
+SUPABASE_SERVICE_ROLE_KEY = (
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    or os.getenv("SUPABASE_SERVICE_KEY", "")
+).strip()
+STORAGE_BACKEND = os.getenv("WID_WINS_STORAGE_BACKEND", "auto").strip().lower()
+
+_SUPABASE_CLIENT: Client | None = None
+if create_client and SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and STORAGE_BACKEND != "sqlite":
+    _SUPABASE_CLIENT = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+
+def _use_supabase() -> bool:
+    if STORAGE_BACKEND == "sqlite":
+        return False
+    return _SUPABASE_CLIENT is not None
 
 
 def _extract_contact_details(message):
@@ -29,6 +56,9 @@ def _get_existing_idea_columns(cursor):
 
 
 def init_db():
+    if _use_supabase():
+        return
+
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -110,8 +140,35 @@ def init_db():
         conn.commit()
 
 
+def _prepare_idea_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    record = dict(payload or {})
+    qa_history = record.get("qa_history", [])
+    if _use_supabase():
+        if isinstance(qa_history, str):
+            try:
+                record["qa_history"] = json.loads(qa_history)
+            except json.JSONDecodeError:
+                record["qa_history"] = qa_history
+        return record
+
+    if not isinstance(qa_history, str):
+        record["qa_history"] = json.dumps(qa_history, ensure_ascii=True)
+    return record
+
+
 def save_lead(message, stage="general"):
     email, phone = _extract_contact_details(message)
+    if _use_supabase():
+        _SUPABASE_CLIENT.table("leads").insert(
+            {
+                "message": message,
+                "stage": stage,
+                "email": email,
+                "phone": phone,
+            }
+        ).execute()
+        return
+
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -123,10 +180,11 @@ def save_lead(message, stage="general"):
 
 def save_idea_intake(payload):
     """Insert or update a structured idea intake record in the dedicated table."""
-    record = dict(payload or {})
-    qa_history = record.get("qa_history", [])
-    if not isinstance(qa_history, str):
-        record["qa_history"] = json.dumps(qa_history, ensure_ascii=True)
+    record = _prepare_idea_payload(payload)
+
+    if _use_supabase():
+        _SUPABASE_CLIENT.table("idea_intakes").upsert(record, on_conflict="session_id").execute()
+        return
 
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
@@ -197,10 +255,37 @@ def save_idea_intake(payload):
         conn.commit()
 
 
+def load_leads(source: str | os.PathLike[str] | None = None) -> list[dict[str, Any]]:
+    if _use_supabase():
+        data = _SUPABASE_CLIENT.table("leads").select("*").order("created_at", desc=False).execute()
+        return list(data.data or [])
+
+    target = source or DB_PATH
+    if not os.path.exists(target):
+        return []
+
+    if str(target).endswith(".jsonl"):
+        records: list[dict[str, Any]] = []
+        with open(target, "r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                records.append(json.loads(line))
+        return records
+
+    return []
+
+
 def load_idea_intakes():
+    if _use_supabase():
+        data = _SUPABASE_CLIENT.table("idea_intakes").select("*").order("updated_at", desc=True).execute()
+        return list(data.data or [])
+
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT session_id, full_name, email, phone, idea_summary, problem, target_users, primary_goal, current_stage, budget, timeline, refined_summary, conversation_summary, qa_history, latest_question, latest_answer, status, created_at, updated_at FROM idea_intakes ORDER BY updated_at DESC")
+        cursor.execute(
+            "SELECT session_id, full_name, email, phone, idea_summary, problem, target_users, primary_goal, current_stage, budget, timeline, refined_summary, conversation_summary, qa_history, latest_question, latest_answer, status, created_at, updated_at FROM idea_intakes ORDER BY updated_at DESC"
+        )
         rows = cursor.fetchall()
     columns = [
         "session_id",
