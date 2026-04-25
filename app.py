@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, render_template
 from ai_engine import get_ai_response
-from conversation import detect_stage, add_guidance, create_profile, update_profile
+from conversation import build_direct_reply, detect_stage, add_guidance, create_profile, update_profile
 from database import save_lead
 from config import ALLOWED_ORIGINS, FLASK_HOST, FLASK_PORT
 
@@ -94,6 +94,10 @@ def chat():
 
     # Save lead with stage and extracted contact fields (if any)
     save_lead(user_message, stage)
+
+    direct_reply = build_direct_reply(stage, user_message, session["profile"])
+    if direct_reply:
+        return jsonify({"reply": direct_reply, "session_id": session_id})
 
     # Add lead + personalization guidance
     guidance = add_guidance(stage, user_message, session["profile"], session["history"])

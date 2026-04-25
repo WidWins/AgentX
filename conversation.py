@@ -182,6 +182,40 @@ def detect_stage(message):
     return "general"
 
 
+def _has_contact_detail(message):
+    text = str(message or "")
+    return bool(EMAIL_RE.search(text) or PHONE_RE.search(text))
+
+
+def _looks_like_idea(message, profile=None):
+    text = _text(message)
+    profile = profile or {}
+    if profile.get("goal") or profile.get("target_customer") or profile.get("problem"):
+        return True
+
+    idea_keywords = (
+        "idea",
+        "startup",
+        "business",
+        "app",
+        "platform",
+        "product",
+        "service",
+        "launch",
+        "build",
+        "create",
+        "solve",
+        "problem",
+        "users",
+        "customers",
+        "clients",
+        "audience",
+        "students",
+        "professionals",
+    )
+    return any(word in text for word in idea_keywords)
+
+
 def _personalization_brief(profile, history):
     parts = []
     if profile.get("name"):
@@ -250,4 +284,30 @@ def add_guidance(stage, message, profile=None, history=None):
 
     parts.append(_personalization_brief(profile or {}, history or []))
     parts.append("Keep response short (2-4 sentences), useful, and include only one question.")
+    parts.append("If the idea is already clear, stop probing and ask for contact details instead of another qualification question.")
     return " ".join(parts)
+
+
+def build_direct_reply(stage, message, profile=None):
+    """Return a deterministic response for the main idea-capture flow when possible."""
+    profile = profile or {}
+    text = str(message or "").strip()
+
+    if not text:
+        return ""
+
+    if stage == "contact_shared" or _has_contact_detail(text):
+        name = profile.get("name", "").strip()
+        name_part = f", {name}" if name else ""
+        return (
+            f"Thanks{name_part}. I’ve noted your details with Wid Wins, and the team will contact you soon. "
+            "Nice speaking with you."
+        )
+
+    if _looks_like_idea(text, profile):
+        return (
+            "I’ve noted your idea with Wid Wins. Please send your name and basic contact details, "
+            "so the team can reach you soon. Nice speaking with you."
+        )
+
+    return ""
