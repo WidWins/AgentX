@@ -17,11 +17,15 @@ def create_profile():
     """Create a lightweight session profile for personalized conversation."""
     return {
         "name": "",
+        "idea_summary": "",
         "goal": "",
         "target_customer": "",
         "problem": "",
         "budget": "",
         "timeline": "",
+        "email": "",
+        "phone": "",
+        "refined_summary": "",
     }
 
 
@@ -134,14 +138,19 @@ def update_profile(profile, message):
     current = dict(profile or create_profile())
 
     name = _extract_name(message)
+    idea_summary = _extract_idea_summary(message)
     goal = _extract_goal(message)
     target_customer = _extract_target_customer(message)
     problem = _extract_problem(message)
     budget = _extract_budget(message)
     timeline = _extract_timeline(message)
+    email_match = EMAIL_RE.search(str(message or ""))
+    phone_match = PHONE_RE.search(str(message or ""))
 
     if name:
         current["name"] = name
+    if idea_summary and not current.get("idea_summary"):
+        current["idea_summary"] = idea_summary
     if goal:
         current["goal"] = goal
     if target_customer:
@@ -152,6 +161,10 @@ def update_profile(profile, message):
         current["budget"] = budget
     if timeline:
         current["timeline"] = timeline
+    if email_match:
+        current["email"] = _clean_value(email_match.group(0))
+    if phone_match:
+        current["phone"] = _clean_value(phone_match.group(0))
 
     return current
 
@@ -190,7 +203,7 @@ def _has_contact_detail(message):
 def _looks_like_idea(message, profile=None):
     text = _text(message)
     profile = profile or {}
-    if profile.get("goal") or profile.get("target_customer") or profile.get("problem"):
+    if profile.get("idea_summary") or profile.get("goal") or profile.get("target_customer") or profile.get("problem"):
         return True
 
     idea_keywords = (
@@ -214,6 +227,74 @@ def _looks_like_idea(message, profile=None):
         "professionals",
     )
     return any(word in text for word in idea_keywords)
+
+
+def _profile_to_lead(profile):
+    from wid_wins_agent import LeadProfile
+
+    return LeadProfile(
+        idea_summary=str(profile.get("idea_summary") or profile.get("goal") or "").strip(),
+        problem=str(profile.get("problem", "")).strip(),
+        target_users=str(profile.get("target_customer", "")).strip(),
+        primary_goal=str(profile.get("goal", "")).strip(),
+        current_stage=str(profile.get("current_stage", "")).strip(),
+        budget=str(profile.get("budget", "")).strip(),
+        timeline=str(profile.get("timeline", "")).strip(),
+        commitment_level=str(profile.get("commitment_level", "")).strip(),
+    )
+
+
+def build_refinement_question(profile, history=None):
+    """Return the next refinement question based on what is still missing."""
+    from wid_wins_agent import build_lead_assessment
+
+    assessment = build_lead_assessment(_profile_to_lead(profile or {}))
+    next_questions = assessment.get("next_questions", []) or []
+    if next_questions:
+        return str(next_questions[0])
+
+    if assessment.get("missing_fields"):
+        return "What problem does your idea solve first?"
+
+    return ""
+
+
+def build_refined_idea_summary(profile, history=None):
+    """Build a concise summary of the user's idea from collected profile details."""
+    parts = []
+    idea = str(profile.get("idea_summary") or profile.get("goal") or "").strip()
+    if idea:
+        parts.append(f"Idea: {idea}")
+    if profile.get("target_customer"):
+        parts.append(f"Target users: {profile['target_customer']}")
+    if profile.get("problem"):
+        parts.append(f"Problem: {profile['problem']}")
+    if profile.get("goal"):
+        parts.append(f"Goal: {profile['goal']}")
+    if profile.get("budget"):
+        parts.append(f"Budget: {profile['budget']}")
+    if profile.get("timeline"):
+        parts.append(f"Timeline: {profile['timeline']}")
+    if profile.get("email") or profile.get("phone"):
+        contact_bits = []
+        if profile.get("email"):
+            contact_bits.append(f"email={profile['email']}")
+        if profile.get("phone"):
+            contact_bits.append(f"phone={profile['phone']}")
+        parts.append("Contact: " + ", ".join(contact_bits))
+    if history:
+        recent_user_messages = []
+        for item in history[-6:]:
+            if isinstance(item, str) and item.strip():
+                recent_user_messages.append(item.strip())
+            elif isinstance(item, dict):
+                text = str(item.get("text", "")).strip()
+                role = str(item.get("role", "")).strip().lower()
+                if text and role in {"user", "assistant"}:
+                    recent_user_messages.append(f"{role}: {text}")
+        if recent_user_messages:
+            parts.append("History: " + " | ".join(recent_user_messages[-3:]))
+    return " | ".join(parts)
 
 
 def _personalization_brief(profile, history):
@@ -285,10 +366,11 @@ def add_guidance(stage, message, profile=None, history=None):
     parts.append(_personalization_brief(profile or {}, history or []))
     parts.append("Keep response short (2-4 sentences), useful, and include only one question.")
     parts.append("If the idea is already clear, stop probing and ask for contact details instead of another qualification question.")
+    parts.append("After contact details are shared, ask the next refinement question and summarize the idea from the conversation history.")
     return " ".join(parts)
 
 
-def build_direct_reply(stage, message, profile=None):
+def build_direct_reply(stage, message, profile=None, history=None):
     """Return a deterministic response for the main idea-capture flow when possible."""
     profile = profile or {}
     text = str(message or "").strip()
@@ -299,15 +381,54 @@ def build_direct_reply(stage, message, profile=None):
     if stage == "contact_shared" or _has_contact_detail(text):
         name = profile.get("name", "").strip()
         name_part = f", {name}" if name else ""
+        summary = build_refined_idea_summary(profile, history or [])
+        next_question = build_refinement_question(profile, history or [])
+        profile_has_core_idea = bool(
+            profile.get("idea_summary")
+            or profile.get("goal")
+            or profile.get("target_customer")
+            or profile.get("problem")
+        )
+        if profile_has_core_idea:
+            summary_text = summary or "your idea is in progress"
+            if not next_question:
+                return (
+                    f"Thanks{name_part}. I've noted your details with Wid Wins. "
+                    f"So far I understand: {summary_text}. "
+                    "I've stored this separately for Wid Wins. Nice speaking with you."
+                )
+            return (
+                f"Thanks{name_part}. I've noted your details with Wid Wins. "
+                f"So far I understand: {summary_text}. "
+                f"To refine it better, {next_question}"
+            )
         return (
-            f"Thanks{name_part}. I’ve noted your details with Wid Wins, and the team will contact you soon. "
+            f"Thanks{name_part}. I've noted your details with Wid Wins, and the team will contact you soon. "
             "Nice speaking with you."
         )
 
     if _looks_like_idea(text, profile):
+        next_question = build_refinement_question(profile, history or [])
+        if not next_question:
+            return (
+                "I've noted your idea with Wid Wins. Please send your name and basic contact details, "
+                "so the team can reach you soon."
+            )
         return (
-            "I’ve noted your idea with Wid Wins. Please send your name and basic contact details, "
-            "so the team can reach you soon. Nice speaking with you."
+            "I've noted your idea with Wid Wins. Please send your name and basic contact details, "
+            f"so the team can reach you soon. After that, {next_question}"
+        )
+
+    if profile.get("email") or profile.get("phone"):
+        next_question = build_refinement_question(profile, history or [])
+        if not next_question:
+            return (
+                "Thanks. I've noted your details with Wid Wins. "
+                "I've stored this separately for Wid Wins. Nice speaking with you."
+            )
+        return (
+            "Thanks. I've noted your details with Wid Wins. "
+            f"To refine the idea, {next_question}"
         )
 
     return ""

@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, render_template
 from ai_engine import get_ai_response
-from conversation import build_direct_reply, detect_stage, add_guidance, create_profile, update_profile
-from database import save_lead
+from conversation import build_direct_reply, build_refined_idea_summary, detect_stage, add_guidance, create_profile, update_profile
+from database import save_idea_intake, save_lead
 from config import ALLOWED_ORIGINS, FLASK_HOST, FLASK_PORT
 
 app = Flask(__name__)
@@ -13,6 +13,7 @@ def _get_session(session_id):
         SESSION_STATE[session_id] = {
             "profile": create_profile(),
             "history": [],
+            "dialogue": [],
         }
     return SESSION_STATE[session_id]
 
@@ -91,12 +92,37 @@ def chat():
     session["profile"] = update_profile(session["profile"], user_message)
     session["history"].append(user_message)
     session["history"] = session["history"][-6:]
+    session["dialogue"].append({"role": "user", "text": user_message})
+    session["dialogue"] = session["dialogue"][-12:]
 
     # Save lead with stage and extracted contact fields (if any)
     save_lead(user_message, stage)
 
-    direct_reply = build_direct_reply(stage, user_message, session["profile"])
+    direct_reply = build_direct_reply(stage, user_message, session["profile"], session["dialogue"])
     if direct_reply:
+        session["dialogue"].append({"role": "assistant", "text": direct_reply})
+        session["dialogue"] = session["dialogue"][-12:]
+        save_idea_intake(
+            {
+                "session_id": session_id,
+                "full_name": session["profile"].get("name", ""),
+                "email": session["profile"].get("email", ""),
+                "phone": session["profile"].get("phone", ""),
+                "idea_summary": session["profile"].get("idea_summary", "") or session["profile"].get("goal", ""),
+                "problem": session["profile"].get("problem", ""),
+                "target_users": session["profile"].get("target_customer", ""),
+                "primary_goal": session["profile"].get("goal", ""),
+                "current_stage": stage,
+                "budget": session["profile"].get("budget", ""),
+                "timeline": session["profile"].get("timeline", ""),
+                "refined_summary": build_refined_idea_summary(session["profile"], session["dialogue"]),
+                "conversation_summary": build_refined_idea_summary(session["profile"], session["dialogue"]),
+                "qa_history": session["dialogue"],
+                "latest_question": direct_reply if "?" in direct_reply else "",
+                "latest_answer": user_message,
+                "status": "in_progress",
+            }
+        )
         return jsonify({"reply": direct_reply, "session_id": session_id})
 
     # Add lead + personalization guidance
@@ -110,6 +136,30 @@ def chat():
             "error": "Internal AI Engine Error",
             "details": str(e)
         }), 500
+
+    session["dialogue"].append({"role": "assistant", "text": ai_reply})
+    session["dialogue"] = session["dialogue"][-12:]
+    save_idea_intake(
+        {
+            "session_id": session_id,
+            "full_name": session["profile"].get("name", ""),
+            "email": session["profile"].get("email", ""),
+            "phone": session["profile"].get("phone", ""),
+            "idea_summary": session["profile"].get("idea_summary", "") or session["profile"].get("goal", ""),
+            "problem": session["profile"].get("problem", ""),
+            "target_users": session["profile"].get("target_customer", ""),
+            "primary_goal": session["profile"].get("goal", ""),
+            "current_stage": stage,
+            "budget": session["profile"].get("budget", ""),
+            "timeline": session["profile"].get("timeline", ""),
+            "refined_summary": build_refined_idea_summary(session["profile"], session["dialogue"]),
+            "conversation_summary": build_refined_idea_summary(session["profile"], session["dialogue"]),
+            "qa_history": session["dialogue"],
+            "latest_question": ai_reply if "?" in ai_reply else "",
+            "latest_answer": user_message,
+            "status": "in_progress",
+        }
+    )
 
     return jsonify({"reply": ai_reply, "session_id": session_id})
 
